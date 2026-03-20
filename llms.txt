@@ -1,0 +1,187 @@
+# TabForge AI Starter — LLM Context File
+# This starter is a pre-configured Jakarta EE application with TabForge AI already set up.
+# The developer cloned this starter and wants to write business logic on top of it.
+# Full API reference: https://github.com/tabforgeai/tabforge-ai/blob/main/llms.txt
+
+## What is already configured in this starter
+
+- TabForge AI dependency (io.github.tabforgeai:tabforge-ai:1.1.0) in pom.xml
+- `-parameters` compiler flag in pom.xml (required for EasyAI tool introspection)
+- DynTabs multi-tab PrimeFaces UI — CDI, JSF navigation, tab shell template
+- `src/main/resources/easyai.properties` — AI provider config (fill in your API key)
+- Logback logging
+- Jakarta EE 11 project structure (CDI, EJB, JSF ready)
+
+The developer does NOT need to add any Maven dependencies or compiler flags.
+They just need to write their tab beans and AI code.
+
+---
+
+## Configure AI (one-time)
+
+Edit `src/main/resources/easyai.properties`:
+```properties
+easyai.provider=openai
+easyai.api-key=sk-YOUR-KEY
+easyai.model-name=gpt-4o-mini
+```
+
+For local Ollama (free, no key needed):
+```properties
+easyai.provider=ollama
+easyai.model-name=llama3
+```
+
+---
+
+## Add a DynTabs tab (typical task)
+
+### 1. Create the tab bean
+```java
+@Named
+@TabScoped
+@DynTab(name = "OrdersDynTab", title = "Orders", includePage = "/WEB-INF/include/orders/orders.xhtml")
+public class OrdersBean extends BaseDyntabCdiBean {
+
+    @Inject OrderService orderService;
+    private List<Order> orders;
+
+    @Override
+    protected void accessPointMethod(Map parameters) {
+        orders = orderService.findAll();   // called when tab opens
+    }
+
+    @Override
+    protected void exitPointMethod() {
+        // cleanup when tab closes (optional)
+    }
+
+    public List<Order> getOrders() { return orders; }
+}
+```
+
+### 2. Create the XHTML page
+Place at: `src/main/webapp/WEB-INF/include/orders/orders.xhtml`
+
+### 3. Add to the menu
+```xml
+<p:menuitem value="Orders" action="uishell:Orders"/>
+```
+
+That's it. DynTabs opens the tab, creates an isolated `@TabScoped` bean instance, calls `accessPointMethod()`.
+
+### Key DynTabs patterns
+```java
+// Send message to all open tabs
+sendMessageToAllAppModules(myPayload);
+
+// Receive message in a tab
+@Override
+public void onApplicationMessage(Object message) { ... }
+
+// Child tab returns value to parent and closes
+closeAndReturnValueToCaller(selectedValue);
+
+// Receive return value in parent tab
+@Override
+public void onReturnedValue(Object value) { ... }
+
+// Open a tab programmatically with parameters
+// (from a menu action or button)
+```
+
+---
+
+## Add AI features
+
+### Simple chat
+```java
+Conversation chat = EasyAI.chat()
+    .withMemory(20)
+    .withSystemMessage("You are a helpful assistant.")
+    .build();
+
+String answer = chat.send(userInput);
+```
+
+### AI assistant with your services (no @Tool annotations needed)
+```java
+@EasyAIAssistant(systemMessage = "You are an e-commerce support bot.")
+public interface SupportBot {
+    String ask(String question);
+}
+
+@Inject OrderService orderService;  // your existing EJB
+
+SupportBot bot = EasyAI.assistant(SupportBot.class)
+    .withTools(orderService)
+    .build();
+
+String answer = bot.ask("Where is order #12345?");
+// AI calls orderService.findOrder("12345") automatically
+```
+
+### @Inject assistant (CDI — no build() needed)
+```java
+@EasyAIAssistant(
+    systemMessage = "You are a support bot",
+    tools = {OrderService.class}
+)
+public interface SupportBot {
+    String ask(String question);
+}
+
+@Inject SupportBot bot;  // ready to use
+```
+
+### AI from documents (RAG)
+```java
+@EasyRAG(source = "classpath:company-policy.pdf")
+@EasyAIAssistant(systemMessage = "Answer based on company policy.")
+public interface PolicyBot {
+    String ask(String question);
+}
+
+PolicyBot bot = EasyAI.assistant(PolicyBot.class).build();
+```
+
+### Autonomous multi-step agent
+```java
+// In a @Named @ApplicationScoped bean — build in @PostConstruct!
+@PostConstruct
+public void init() {
+    agent = EasyAI.agent()
+        .withServices(orderService, paymentService, shippingService)
+        .withMaxSteps(10)
+        .withPlanningPrompt(true)
+        .withStepListener(step ->
+            log.info("Step {}: {} -> {}", step.stepNumber(), step.toolName(), step.result()))
+        .build();
+}
+
+String result = agent.execute("Process order #42: verify stock, charge card, schedule delivery");
+```
+
+---
+
+## Error handling (always wrap AI calls)
+```java
+try {
+    return bot.ask(userQuestion);
+} catch (Exception e) {
+    log.error("AI call failed", e);
+    return "Sorry, something went wrong: " + EasyAI.extractErrorMessage(e);
+}
+```
+
+---
+
+## Common mistakes to avoid
+- **Do NOT build EasyAgent at field initialization** in a CDI bean — `@Inject` fields are null at that point. Always use `@PostConstruct`.
+- **Do NOT add quotes** to values in easyai.properties: `model-name=gpt-4o` not `model-name="gpt-4o"`.
+- **Tool methods should return String** — or ensure `toString()` is meaningful.
+
+---
+
+## Full API reference
+https://github.com/tabforgeai/tabforge-ai/blob/main/llms.txt
