@@ -2,7 +2,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>com.tabforgeai</groupId>
   <artifactId>tabforge-ai-starter</artifactId>
-  <version>1.0.0-SNAPSHOT</version>
+  <version>1.2.0</version>
   <packaging>war</packaging>
   
     <properties>
@@ -11,7 +11,7 @@
     </properties>
     
      <build>
-        <finalName>tabforge_ai_starter_1.1</finalName>
+        <finalName>tabforge_ai_starter_1.2</finalName>
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

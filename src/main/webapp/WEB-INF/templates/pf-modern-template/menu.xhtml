@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+  <ui:composition xmlns="http://www.w3.org/1999/xhtml"
+                  xmlns:h="jakarta.faces.html"
+                  xmlns:ui="jakarta.faces.facelets"
+                  xmlns:p="http://primefaces.org/ui">
+
+      <nav class="layout-sidebar" aria-label="Main navigation">
+          <div class="sidebar-menu">
+
+              <h:form id="menuForm">
+
+                  <!-- Group: Home -->
+                  <div class="menu-group">
+                      <span class="menu-group-label">Home</span>
+                      <ul class="menu-list" role="list">
+                          <li>
+                              <p:commandLink action="uishell:Home"
+                                             process="@this"
+                                             immediate="true"
+                                             styleClass="menu-link">
+                                  <i class="pi pi-home menu-icon" />
+                                  <span class="menu-label">Home</span>
+                              </p:commandLink>
+                          </li>
+                      </ul>
+                  </div>
+
+                  <!-- Group: Administration (placeholder — add your items here) -->
+                  <div class="menu-group">
+                      <span class="menu-group-label">Administration</span>
+                      <ul class="menu-list" role="list">
+                          <li>
+                              <a href="#" class="menu-link">
+                                  <i class="pi pi-align-left menu-icon" />
+                                  <span class="menu-label">Place menu items here</span>
+                              </a>
+                          </li>
+                      </ul>
+                  </div>
+                  
+                                   <!-- Group: AI -->
+                  <div class="menu-group">
+                      <span class="menu-group-label">AI</span>
+                      <ul class="menu-list" role="list">
+                          <li>
+                              <a href="#" class="menu-link"
+                                 onclick="PFTemplate.toggleAiPanel(); return false;">
+                                  <i class="pi pi-sparkles menu-icon" />
+                                  <span class="menu-label">AI Assistant</span>
+                              </a>
+                          </li>
+                      </ul>
+                  </div>
+
+              </h:form>
+
+          </div>
+      </nav>
+
+  </ui:composition>
