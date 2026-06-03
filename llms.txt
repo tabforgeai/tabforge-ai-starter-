@@ -5,7 +5,7 @@
 
 ## What is already configured in this starter
 
-- TabForge AI dependency (io.github.tabforgeai:tabforge-ai:1.1.0) in pom.xml
+- TabForge AI dependency (io.github.tabforgeai:tabforge-ai:2.0.0) in pom.xml
 - `-parameters` compiler flag in pom.xml (required for EasyAI tool introspection)
 - DynTabs multi-tab PrimeFaces UI — CDI, JSF navigation, tab shell template
 - `src/main/resources/easyai.properties` — AI provider config (fill in your API key)
