@@ -10,28 +10,40 @@ import jakarta.inject.Inject;
 
 /**
  * Orchestrates one user message: decides whether it is a plain chat turn or an agent
- * task, runs it, and streams the result to the browser as a sequence of
+ * task, runs it, and lets EasyAI stream the whole story to the browser as a sequence of
  * {@link AgentEvent}s over SSE.
+ *
+ * <h2>The 2.1 pattern — one listener, no manual glue</h2>
+ * Both paths attach an {@link EasyAiActivityBridge} via {@code .withEventListener(bridge)} and
+ * then simply do their work. EasyAI itself emits the lifecycle events (started → tool calls →
+ * finished, or started → reply → finished); the bridge turns each into an Activity row or a chat
+ * bubble. This class adds only two things the core cannot know on its own:
+ * <ul>
+ *   <li>the agent's <b>final prose answer</b> (the agent narrates its steps but returns its
+ *       answer as a value, so we push it to the bubble explicitly), and</li>
+ *   <li>a <b>readable error bubble</b> if the operation throws (the bridge already drew the red
+ *       Activity row; we add the human-facing apology in the chat).</li>
+ * </ul>
  *
  * <h2>Place in the flow</h2>
  * <pre>
  *   AiChatResource (POST /api/ai/chat)
  *        → process(sessionId, text)
- *        → emits: agent_started → [tool_call …] → assistant_message → agent_finished
- *        → AiEventChannel → SSE → AI panel (chat bubble + Activity tab)
+ *        → EasyAI.chat()/agent().withEventListener(bridge) … run
+ *        → bridge → AiEventChannel → SSE → AI panel (chat bubble + Activity tab)
  * </pre>
  *
  * <h2>Two paths</h2>
  * <ul>
  *   <li><b>Chat (default):</b> any normal message → {@link ChatService} (session memory).
- *       Produces a thin but real timeline: started → reply → finished.</li>
+ *       Timeline: agent_started → assistant_message (reply) → agent_finished.</li>
  *   <li><b>Agent demo:</b> a message prefixed with {@value #AGENT_PREFIX} → {@link EasyAI#agent()}
- *       with {@link DemoToolService}. The agent's tool calls surface live as {@code tool_call}
- *       rows in the Activity tab. Example: {@code /agent what is 23 + 19 and what time is it?}</li>
+ *       with {@link DemoToolService}. Each tool call surfaces live as a {@code tool_call} →
+ *       {@code tool_result} pair. Example: {@code /agent what is 23 + 19 and what time is it?}</li>
  * </ul>
  *
- * Request-scoped: a fresh instance handles each POST; all cross-request state lives in
- * the application-scoped {@link AiEventChannel} and the session-scoped {@link ChatService}.
+ * Request-scoped: a fresh instance handles each POST; all cross-request state lives in the
+ * application-scoped {@link AiEventChannel} and the session-scoped {@link ChatService}.
  */
 @RequestScoped
 public class ChatProcessor {
@@ -40,9 +52,6 @@ public class ChatProcessor {
 
     /** Messages beginning with this prefix are routed to the agent demo path. */
     static final String AGENT_PREFIX = "/agent ";
-
-    /** Max characters of a tool's arguments/result shown in an Activity row. */
-    private static final int DETAIL_LIMIT = 120;
 
     @Inject
     private ChatService chatService;
@@ -54,10 +63,7 @@ public class ChatProcessor {
     private AiEventChannel channel;
 
     /**
-     * Handle one user message end-to-end and stream the outcome over SSE.
-     *
-     * Never throws: chat errors are already absorbed by {@link ChatService}, and agent
-     * errors are caught here and surfaced as an {@code error} + {@code assistant_message}.
+     * Handle one user message end-to-end; the outcome streams back over SSE.
      *
      * @param sessionId the HTTP session id used to target this user's SSE stream
      * @param userText  the raw message typed in the chat panel (may be null/blank)
@@ -75,64 +81,46 @@ public class ChatProcessor {
     }
 
     /**
-     * Plain chat turn: delegate to the session-scoped {@link ChatService} and stream the
-     * reply. No tool calls, so the Activity tab shows only the start/finish rows.
+     * Plain chat turn: the session {@link ChatService} (with the bridge attached) narrates the
+     * whole turn itself, so this method only has to translate a failure into a readable bubble.
      *
      * @param sessionId target SSE session
      * @param text      the user's message
      */
     private void runChat(String sessionId, String text) {
-        channel.emit(sessionId, AgentEvent.agentStarted("Assistant", "Processing request"));
-        String reply = chatService.send(text);            // blocking; never throws
-        channel.emit(sessionId, AgentEvent.assistantMessage(reply));
-        channel.emit(sessionId, AgentEvent.agentFinished("Assistant", "Response ready"));
+        try {
+            chatService.send(sessionId, text); // bridge emits started → reply (bubble) → finished
+        } catch (Exception e) {
+            log.error("Chat failed", e);
+            // the bridge already drew an 'error' Activity row; add the human-facing apology
+            channel.emit(sessionId, AgentEvent.assistantMessage(
+                    "Sorry, something went wrong: " + EasyAI.extractErrorMessage(e)));
+        }
     }
 
     /**
-     * Agent demo: build an {@link EasyAgent} over {@link DemoToolService} and execute the
-     * task. The step listener fires after each tool call and is mapped to a live
-     * {@code tool_call} Activity row. The agent is built inside this method (not at field
-     * init) so the injected {@link #tools} bean is available and the listener can close
-     * over {@code sessionId}.
+     * Agent demo: build an {@link EasyAgent} over {@link DemoToolService} with the bridge attached,
+     * then execute. The bridge surfaces every tool call live; we push the agent's final prose
+     * answer to the chat bubble (the core narrates steps, not the closing sentence).
      *
-     * @param sessionId target SSE session (captured by the step listener)
+     * @param sessionId target SSE session (the bridge is bound to it)
      * @param task      the task text (message with the {@value #AGENT_PREFIX} prefix removed)
      */
     private void runAgent(String sessionId, String task) {
-        channel.emit(sessionId, AgentEvent.agentStarted("DemoAgent", "Planning task"));
+        EasyAgent agent = EasyAI.agent()
+                .withServices(tools)
+                .withMaxSteps(8)
+                .withPlanningPrompt(true)
+                .withEventListener(new EasyAiActivityBridge(channel, sessionId)) // ← live tool-call feed
+                .build();
         try {
-            EasyAgent agent = EasyAI.agent()
-                    .withServices(tools)
-                    .withMaxSteps(8)
-                    .withPlanningPrompt(true)
-                    .withStepListener(step -> channel.emit(sessionId, AgentEvent.toolCall(
-                            "DemoAgent",
-                            step.toolName(),
-                            truncate(step.arguments()) + " → " + truncate(step.result()))))
-                    .build();
-
-            String reply = agent.execute(task);
-            channel.emit(sessionId, AgentEvent.assistantMessage(reply));
-            channel.emit(sessionId, AgentEvent.agentFinished("DemoAgent", "Task complete"));
+            String reply = agent.execute(task);                               // bridge narrates the steps
+            channel.emit(sessionId, AgentEvent.assistantMessage(reply));      // final prose → chat bubble
         } catch (Exception e) {
             log.error("Agent run failed", e);
-            String readable = EasyAI.extractErrorMessage(e);
-            channel.emit(sessionId, AgentEvent.error("Agent failed", readable));
-            channel.emit(sessionId, AgentEvent.assistantMessage("Sorry, the agent failed: " + readable));
-            channel.emit(sessionId, AgentEvent.agentFinished("DemoAgent", "Failed"));
+            // the bridge already drew an 'error' Activity row; add the human-facing apology
+            channel.emit(sessionId, AgentEvent.assistantMessage(
+                    "Sorry, the agent failed: " + EasyAI.extractErrorMessage(e)));
         }
-    }
-
-    /**
-     * Shorten a tool argument/result string for display in an Activity row.
-     *
-     * @param s the raw string (may be null)
-     * @return {@code ""} for null, the string itself if short, or a truncated form with an ellipsis
-     */
-    private static String truncate(String s) {
-        if (s == null) {
-            return "";
-        }
-        return s.length() <= DETAIL_LIMIT ? s : s.substring(0, DETAIL_LIMIT) + "…";
     }
 }
