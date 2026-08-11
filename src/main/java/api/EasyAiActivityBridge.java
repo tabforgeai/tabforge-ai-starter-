@@ -118,6 +118,7 @@ public class EasyAiActivityBridge implements EasyAIListener {
             case ASSISTANT -> "Assistant";
             case RAG       -> "RAG";
             case AGENT     -> "Agent";
+            case FLOW      -> "Flow";
             case INDEXER   -> "Indexer";
             case EXTRACT   -> "Extractor";
         };
