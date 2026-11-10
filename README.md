@@ -43,7 +43,7 @@ logic, and start building.
    mvn clean package
    ```
 
-   Deploy `target/tabforge_ai_starter_2.0.war` to your application server.
+   Deploy `target/tabforge-ai-starter.war` to your application server.
    (See `BUILD_DEPLOY_UNDEPLOY.TXT` for ready-made GlassFish `asadmin` commands.)
 4. Log in, open the **AI Assistant** panel (sparkle icon, top-right), and send a message.
 
